@@ -1,0 +1,173 @@
+---
+title: 'Kaggle report: Predicting Rent in New York with Airbnb data'
+author: "Shiyu Hua"
+date: "12/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Executive Summary 
+This report aims to analyze and predict rental price using Airbnb data on renter, property, and review. 
+
+## Read Data
+Set my working directory to the location where the data is saved, and load the data. "analysisData" is the training data, and "scoringData" is the testing data. 
+```{r}
+setwd('C:/Users/lilyh/Desktop/first semester/5200/kaggle project/rentlala2021')
+```
+
+```{r}
+data = read.csv('analysisData.csv')
+scoringData = read.csv('scoringData.csv')
+```
+
+
+## Explore and prepare the data 
+Explore the dataset. First step, skim the data to have a summary of each variable. 
+```{r}
+library(skimr)
+skim(data)
+```
+
+Then, explore the dependent variable -- price, and filter price to be larger than 0. 
+```{r}
+library(ggplot2)
+library(dplyr)
+summary(data$price)
+
+ggplot(aes(price), data =data) +
+  geom_histogram()
+
+data = data %>%
+  filter(price > 0)
+```
+
+After keeping rows with positive price, then continue on to the cleaning process. 
+```{r}
+## I assume the NA value in cleaning fee means no cleaning fee. 
+summary(data$cleaning_fee)
+
+data$cleaning_fee[is.na(data$cleaning_fee)] <- 0
+```
+
+```{r}
+library(caret)
+
+## I use the median impute method to fill in the missing values. 
+data_caret = predict(preProcess(data, 
+                                method = 'medianImpute'),
+                     newdata = data)
+```
+
+Amenities are important parts to determine the rental price. The variable contains the list of amenities and need to separate or extract some popular amenities for the analysis. 
+```{r}
+data_clean = data_caret %>%
+  mutate(Wifi = grepl(c("Wifi"), amenities, fixed = TRUE)) %>%
+  mutate(TV = grepl(c("TV"), amenities, fixed = TRUE)) %>%
+  mutate(Air_condition = grepl(c("Air conditioning"), amenities, fixed = TRUE)) %>%
+  mutate(Heating = grepl(c("Heating"), amenities, fixed = TRUE)) %>%
+  mutate(Cookingware = grepl(c("Cooking basics"), amenities, fixed = TRUE)) %>%
+  mutate(Dishes = grepl(c("Dishes and silverware"), amenities, fixed = TRUE)) %>%
+  mutate(Kitchen = grepl(c("Kitchen"), amenities, fixed = TRUE)) %>%
+  mutate(Free_parking = grepl(c("Free parking"), amenities, fixed = TRUE)) %>%
+  mutate(Washer = grepl(c("Washer"), amenities, fixed = TRUE))
+
+```
+
+## Best analysis model 
+The best model in the project is the tuned random forest. I tuned the hyper-parameters mtry, splitrule and min.node.size with 10-fold cross validation using the caret framework. 
+```{r}
+library(caret)
+library(ranger)
+library(randomForest)
+trControl=trainControl(method="cv",number=10)
+tuneGrid = expand.grid(mtry=31, 
+                       splitrule = c('variance','extratrees','maxstat'), 
+                       min.node.size = c(2,5,10,15,20,25))
+
+set.seed(123)
+
+cvModel = train(price ~ room_type+accommodates+bedrooms+bathrooms+beds+neighbourhood_group_cleansed+minimum_nights_avg_ntm+availability_365+availability_90+number_of_reviews_ltm+cancellation_policy+calculated_host_listings_count_entire_homes+calculated_host_listings_count_private_rooms+calculated_host_listings_count_shared_rooms+number_of_reviews+review_scores_rating+review_scores_accuracy+review_scores_cleanliness+review_scores_checkin+review_scores_communication+review_scores_location+review_scores_value+TV+Air_condition+Heating+Cookingware+Dishes+Kitchen+Free_parking+Washer+cleaning_fee, data_clean, 
+                method="ranger",
+                num.trees=500,
+                trControl=trControl,
+                tuneGrid=tuneGrid)
+cvModel$bestTune
+```
+
+After getting the best combination of hyper parameters, I fitted a random forest model using ranger method and generated 500 trees
+```{r}
+set.seed(123)
+cv_forest_ranger = ranger(price ~ room_type+accommodates+bedrooms+bathrooms+beds+neighbourhood_group_cleansed+minimum_nights_avg_ntm+availability_365+availability_90+number_of_reviews_ltm+cancellation_policy+calculated_host_listings_count_entire_homes+calculated_host_listings_count_private_rooms+calculated_host_listings_count_shared_rooms+number_of_reviews+review_scores_rating+review_scores_accuracy+review_scores_cleanliness+review_scores_checkin+review_scores_communication+review_scores_location+review_scores_value+TV+Air_condition+Heating+Cookingware+Dishes+Kitchen+Free_parking+Washer+cleaning_fee, data_clean,
+                          num.trees = 500, 
+                          mtry=cvModel$bestTune$mtry, 
+                          min.node.size = cvModel$bestTune$min.node.size, 
+                          splitrule = cvModel$bestTune$splitrule, 
+                          importance = "permutation")
+```
+
+
+Last step, predict the price using the model and calculated the rmse value for the training data. 
+```{r}
+pred_train = predict(cv_forest_ranger, data = data_clean, num.trees = 500)
+rmse_train_cv_forest_ranger = sqrt(mean((pred_train$predictions - data_clean$price)^2)); rmse_train_cv_forest_ranger
+```
+
+Relative importance of predictors
+```{r}
+varimps = round(ranger::importance(cv_forest_ranger),3)
+
+rev(sort(varimps))
+```
+
+
+
+## Apply the model to the scoring data. 
+
+Before applying the model, I skimmed the testing data and prepare the data with the same procedure used in the training data. 
+```{r}
+skim(scoringData)
+```
+
+```{r}
+scoringData$cleaning_fee[is.na(scoringData$cleaning_fee)] <- 0
+
+
+scoringData = predict(preProcess(scoringData, 
+                                method = 'medianImpute'),
+                     newdata = scoringData)
+```
+
+```{r}
+scoringData_clean = scoringData %>%
+  mutate(Wifi = grepl(c("Wifi"), amenities, fixed = TRUE)) %>%
+  mutate(TV = grepl(c("TV"), amenities, fixed = TRUE)) %>%
+  mutate(Air_condition = grepl(c("Air conditioning"), amenities, fixed = TRUE)) %>%
+  mutate(Heating = grepl(c("Heating"), amenities, fixed = TRUE)) %>%
+  mutate(Cookingware = grepl(c("Cooking basics"), amenities, fixed = TRUE)) %>%
+  mutate(Dishes = grepl(c("Dishes and silverware"), amenities, fixed = TRUE)) %>%
+  mutate(Kitchen = grepl(c("Kitchen"), amenities, fixed = TRUE)) %>%
+  mutate(Free_parking = grepl(c("Free parking"), amenities, fixed = TRUE)) %>%
+  mutate(Washer = grepl(c("Washer"), amenities, fixed = TRUE))
+
+```
+
+Apply the best model -- tuned random forest -- to the scoring data. 
+```{r}
+pred = predict(cv_forest_ranger, data=scoringData_clean, num.trees = 500)
+```
+
+Finally, construct the submission from predictions. 
+```{r}
+# Construct submission from predictions
+submissionFile = data.frame(id = scoringData_clean$id, price = pred[1])
+
+library(dplyr)
+submissionFile = submissionFile %>%
+  rename(price = predictions)
+
+write.csv(submissionFile, 'sample_submission.csv',row.names = F)
+```
+
