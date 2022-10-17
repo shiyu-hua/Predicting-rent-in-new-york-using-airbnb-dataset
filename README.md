@@ -1,4 +1,4 @@
-# predicting-rent-in-new-york-using-airbnb-dataset
+# Predicting-rent-in-new-york-using-airbnb-dataset
 
 Problem: Find the best-performed model to predict the rental prices in New York
 
